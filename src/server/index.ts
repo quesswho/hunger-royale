@@ -81,7 +81,7 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-const clientDistPath = path.resolve(__dirname, "../../client");
+const clientDistPath = path.resolve(process.cwd(), "dist/client");
 app.use(express.static(clientDistPath));
 app.get("*", (_req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));

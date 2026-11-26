@@ -58,56 +58,75 @@ export function App() {
   const [hostAuthError, setHostAuthError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const strategySendTimerRef = useRef<number | null>(null);
 
   const joinUrl = useMemo(() => window.location.origin, []);
   const projectorUrl = useMemo(() => `${window.location.origin}/projector`, []);
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
-    wsRef.current = ws;
+    let cancelled = false;
+    let reconnectTimer: number | null = null;
 
-    ws.onopen = () => {
-      setConnected(true);
-      if (route === "host") {
-        const savedPin = sessionStorage.getItem(HOST_PIN_STORAGE_KEY);
-        if (savedPin) {
-          ws.send(JSON.stringify({ type: "host_auth", pin: savedPin }));
+    function connect() {
+      if (cancelled) return;
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setConnected(true);
+        if (route === "host") {
+          const savedPin = sessionStorage.getItem(HOST_PIN_STORAGE_KEY);
+          if (savedPin) {
+            ws.send(JSON.stringify({ type: "host_auth", pin: savedPin }));
+          }
         }
-      }
-    };
+      };
 
-    ws.onclose = () => {
-      setConnected(false);
-      setHostAuthed(false);
-    };
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data) as ServerMessage;
-      if (msg.type === "welcome") {
-        setMyPlayerId(msg.playerId);
-        setState(msg.state);
-      } else if (msg.type === "state") {
-        setState(msg.state);
-      } else if (msg.type === "host_auth_result") {
-        if (msg.ok) {
-          setHostAuthed(true);
-          setHostAuthError(null);
-        } else {
-          setHostAuthed(false);
-          sessionStorage.removeItem(HOST_PIN_STORAGE_KEY);
-          setHostAuthError(msg.error ?? "Invalid host PIN.");
+      ws.onclose = () => {
+        setConnected(false);
+        setHostAuthed(false);
+        if (!cancelled) {
+          reconnectTimer = window.setTimeout(connect, 1500);
         }
-      } else if (msg.type === "kicked") {
-        setJoined(false);
-        setReady(false);
-        setError(msg.message);
-      } else if (msg.type === "error") {
-        setError(msg.message);
-      }
-    };
+      };
 
-    return () => ws.close();
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data) as ServerMessage;
+        if (msg.type === "welcome") {
+          setMyPlayerId(msg.playerId);
+          setState(msg.state);
+        } else if (msg.type === "state") {
+          setState(msg.state);
+        } else if (msg.type === "host_auth_result") {
+          if (msg.ok) {
+            setHostAuthed(true);
+            setHostAuthError(null);
+          } else {
+            setHostAuthed(false);
+            sessionStorage.removeItem(HOST_PIN_STORAGE_KEY);
+            setHostAuthError(msg.error ?? "Invalid host PIN.");
+          }
+        } else if (msg.type === "kicked") {
+          setJoined(false);
+          setReady(false);
+          setError(msg.message);
+        } else if (msg.type === "error") {
+          setError(msg.message);
+        }
+      };
+    }
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      if (strategySendTimerRef.current !== null) {
+        window.clearTimeout(strategySendTimerRef.current);
+      }
+      wsRef.current?.close();
+    };
   }, [route]);
 
   function send(msg: ClientMessage) {
@@ -124,10 +143,21 @@ export function App() {
     setJoined(true);
   }
 
-  function updateStrategy(next: Strategy, nextReady = ready) {
+  function updateStrategy(next: Strategy, nextReady = ready, immediate = false) {
     setStrategy(next);
     setReady(nextReady);
-    send({ type: "update_strategy", strategy: next, ready: nextReady });
+    if (strategySendTimerRef.current !== null) {
+      window.clearTimeout(strategySendTimerRef.current);
+      strategySendTimerRef.current = null;
+    }
+    if (immediate) {
+      send({ type: "update_strategy", strategy: next, ready: nextReady });
+    } else {
+      strategySendTimerRef.current = window.setTimeout(() => {
+        send({ type: "update_strategy", strategy: next, ready: nextReady });
+        strategySendTimerRef.current = null;
+      }, 150);
+    }
   }
 
   function handleHostLogin(e: React.FormEvent) {
@@ -692,7 +722,7 @@ export function App() {
             <button
               className="primary"
               disabled={state.phase === "running"}
-              onClick={() => updateStrategy(strategy, !ready)}
+              onClick={() => updateStrategy(strategy, !ready, true)}
             >
               {state.phase === "running"
                 ? "Match in Progress..."
