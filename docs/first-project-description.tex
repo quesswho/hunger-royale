@@ -29,14 +29,14 @@ We model an $N$-player simultaneous-move game over discrete rounds $t = 1, \dots
   \item \textbf{Aggression ($a_i$):} Probability of choosing \emph{Fight} ($a_i$) versus \emph{Flee} ($1-a_i$) when within another player's fight radius.
   \item \textbf{Damage vs.\ Defense ($d_i$):} Continuous trade-off between offensive power and defensive mitigation.
 \end{itemize}
-Each player starts with normalized health $H_i(0) = 1$ (with zero regeneration in the base model) and initial points $P_0$. Each round is resolved simultaneously. Unengaged players move by sampling a direction in the range $U(0,2\pi)$ and step-size from a Uniform distribution $U(0.5,1.5)$, clamped to the boundary $R(t)$. Players within fight radius simultaneously choose \emph{Fight} or \emph{Flee}: if both fight, both deal full combat damage; if one flees and the other fights, the fleeing player moves in the boundary-constrained direction maximizing distance from the opponent while taking reduced damage $\rho \cdot \Delta(d_i, d_j)$ with flee-damage factor $\rho \in [0, 1)$; if both flee, both separate without damage. Damage from player $i$ to $j$ is governed by a single lethality constant $\lambda > 0$:
+Each player starts with normalized health $H_i(0) = 1$ (with zero regeneration in the base model) and initial points $P_0$. Each round is resolved simultaneously. Unengaged players move by sampling a direction in the range $U(0,2\pi)$ and step-size from a Uniform distribution, clamped to the boundary $R(t)$. Players within fight radius simultaneously choose \emph{Fight} or \emph{Flee}: if both fight, both deal damage; if one flees and the other fights, the fleeing player moves in the boundary-constrained direction maximizing distance from the opponent while sustaining reduced damage $\rho \cdot \Delta(d_i, d_j)$, where $\rho \in [0, 1)$ is the flee-damage factor; if both flee, both separate without damage. Damage from player $i$ to $j$ is governed by a single lethality constant $\lambda > 0$:
 \[
 \Delta(d_i, d_j) = \lambda \cdot \frac{1 + d_i}{1 + (1 - d_j)}.
 \]
 Payoffs are scaled by a smooth radial multiplier $m(r, t) = 1 + \gamma\bigl(1 - r / R(t)\bigr)$, where $\gamma \ge 0$ controls the center-to-edge risk--reward gradient. Surviving a round yields $s \cdot m(r_i, t)$, and eliminating an opponent $j$ with points $P_j$ grants a bounty $(P_j / k) \cdot m(r_i, t)$.
 
 \section{Research Question and Aim}
-Our central research question is: \emph{How do continuous aggression ($a$) and damage--defense allocation ($d$) interact in a shrinking, radially weighted spatial arena, and which strategies emerge as best responses or evolutionarily stable?} Specifically, we aim to: (i) map the payoff landscape over $(a,d) \in [0,1]^2$, (ii) compare outcomes against a simplified two-player asymmetric Hawk--Dove baseline to isolate the effects of shrinking geometry and bounty payoffs, and (iii) examine how varying key parameters ($\gamma$, $\lambda$, $k$) and introducing extensions such as zone-dependent health regeneration shift the equilibrium.
+Our central research question is: \emph{How do continuous aggression ($a$) and damage--defense allocation ($d$) interact in a shrinking, radially weighted spatial arena, and which strategies emerge as best responses or evolutionarily stable?} Specifically, we aim to: (i) map the payoff landscape over $(a,d) \in [0,1]^2$, (ii) compare outcomes against a simplified two-player asymmetric Hawk--Dove baseline to isolate the effects of shrinking geometry and bounty payoffs, and (iii) examine how varying key parameters ($\gamma$, $\lambda$, $\rho$, $k$) shift the equilibrium.
 
 \section{Method}
 We combine analytical benchmarking with agent-based simulation:
@@ -47,7 +47,7 @@ We combine analytical benchmarking with agent-based simulation:
 \end{enumerate}
 
 \section{Scope and Limitations}
-To keep the model parsimonious and analyzable within the course timeframe, we adopt several deliberate simplifications: strategies $(a_i, d_i)$ are fixed throughout a match and do not condition on current health, position, or remaining players; unengaged movement follows a stochastic random-walk heuristic rather than optimal path-planning; and close-range encounters are resolved against the nearest opponent without explicit alliances or coalitions. These abstractions isolate the core interaction between aggression, capability investment, and shrinking spatial pressure while leaving state-dependent policies as natural extensions.
+To keep the model parsimonious and analyzable within the course timeframe, we adopt several deliberate simplifications: strategies $(a_i, d_i)$ are fixed throughout a match and do not condition on current health, position, or remaining players; unengaged movement follows a stochastic direction/length sample rather than optimal path-planning; and close-range encounters are resolved against the nearest opponent without explicit alliances or coalitions. These abstractions isolate the core interaction between aggression, capability investment, and shrinking spatial pressure while leaving state-dependent policies as natural extensions.
 
 \begin{thebibliography}{9}\itemsep1pt
 \small
