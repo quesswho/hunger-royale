@@ -56,6 +56,7 @@ export function App() {
   const [pinInput, setPinInput] = useState("");
   const [hostAuthed, setHostAuthed] = useState(false);
   const [hostAuthError, setHostAuthError] = useState<string | null>(null);
+  const [showProjectorLogin, setShowProjectorLogin] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const strategySendTimerRef = useRef<number | null>(null);
@@ -75,7 +76,7 @@ export function App() {
 
       ws.onopen = () => {
         setConnected(true);
-        if (route === "host") {
+        if (route === "host" || route === "projector") {
           const savedPin = sessionStorage.getItem(HOST_PIN_STORAGE_KEY);
           if (savedPin) {
             ws.send(JSON.stringify({ type: "host_auth", pin: savedPin }));
@@ -102,6 +103,7 @@ export function App() {
           if (msg.ok) {
             setHostAuthed(true);
             setHostAuthError(null);
+            setShowProjectorLogin(false);
           } else {
             setHostAuthed(false);
             sessionStorage.removeItem(HOST_PIN_STORAGE_KEY);
@@ -230,6 +232,17 @@ export function App() {
             <button onClick={handleHostLogout}>Log Out</button>
           </div>
         )}
+        {route === "projector" && (
+          <div className="actions">
+            {hostAuthed ? (
+              <button onClick={handleHostLogout}>Lock Controls</button>
+            ) : (
+              <button onClick={() => setShowProjectorLogin((v) => !v)}>
+                {showProjectorLogin ? "Cancel" : "Unlock Host Controls"}
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       {error && (
@@ -241,9 +254,101 @@ export function App() {
         </div>
       )}
 
-      {/* PROJECTOR VIEW (READ-ONLY) */}
+      {/* PROJECTOR VIEW (OPTIONAL PIN-PROTECTED HOST CONTROLS) */}
       {route === "projector" && (
         <>
+          {!hostAuthed && showProjectorLogin && (
+            <form
+              className="card control-bar"
+              onSubmit={handleHostLogin}
+              style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}
+            >
+              <input
+                type="password"
+                inputMode="numeric"
+                placeholder="Host PIN"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                autoFocus
+                style={{
+                  background: "#0b1120",
+                  color: "#f8fafc",
+                  border: "1px solid #334155",
+                  borderRadius: "8px",
+                  padding: "9px 12px",
+                  fontSize: "0.95rem",
+                }}
+              />
+              <button className="primary" type="submit" disabled={!connected}>
+                Unlock
+              </button>
+              {hostAuthError && <span className="error-text">{hostAuthError}</span>}
+            </form>
+          )}
+
+          {hostAuthed && (
+            <section className="card control-bar">
+              <div className="actions wrap">
+                {state.phase === "lobby" || state.phase === "results" ? (
+                  <button
+                    className="primary"
+                    onClick={() => send({ type: "host_start" })}
+                  >
+                    {state.phase === "results"
+                      ? "Run Again"
+                      : "Start Tournament"}
+                  </button>
+                ) : state.phase === "running" ? (
+                  <button
+                    className="primary"
+                    onClick={() => send({ type: "host_pause" })}
+                  >
+                    Pause
+                  </button>
+                ) : (
+                  <button
+                    className="primary"
+                    onClick={() => send({ type: "host_resume" })}
+                  >
+                    Resume
+                  </button>
+                )}
+
+                <button
+                  onClick={() => send({ type: "host_step" })}
+                  disabled={state.phase === "results"}
+                >
+                  Step 1 Round
+                </button>
+
+                <button
+                  onClick={() =>
+                    send({
+                      type: "host_toggle_lock",
+                      locked: !state.lobbyLocked,
+                    })
+                  }
+                >
+                  {state.lobbyLocked ? "Unlock Lobby" : "Lock Lobby"}
+                </button>
+
+                <button
+                  onClick={() => send({ type: "host_add_bots", count: 6 })}
+                >
+                  +6 Bots
+                </button>
+
+                <button onClick={() => send({ type: "host_clear_bots" })}>
+                  Clear Bots
+                </button>
+
+                <button onClick={() => send({ type: "host_reset" })}>
+                  Reset to Lobby
+                </button>
+              </div>
+            </section>
+          )}
+
           {!state.match ? (
             <section className="host-grid">
               <div className="card qr-card">
@@ -260,7 +365,9 @@ export function App() {
               <div className="card">
                 <div className="card-header">
                   <h2>Lobby ({state.lobbyPlayers.length})</h2>
-                  <span className="status-pill">WAITING FOR HOST</span>
+                  <span className="status-pill">
+                    {hostAuthed ? "HOST READY" : "WAITING FOR HOST"}
+                  </span>
                 </div>
                 <div className="zone-legend">
                   <div className="zone-chip inner">
@@ -294,9 +401,21 @@ export function App() {
                           {p.name}
                           {p.isBot && <span className="bot-tag">BOT</span>}
                         </span>
-                        <span className={`badge ${p.ready ? "ready" : ""}`}>
-                          {p.ready ? "Ready" : "Tuning..."}
-                        </span>
+                        <div className="player-actions">
+                          <span className={`badge ${p.ready ? "ready" : ""}`}>
+                            {p.ready ? "Ready" : "Tuning..."}
+                          </span>
+                          {hostAuthed && (
+                            <button
+                              className="danger small-btn"
+                              onClick={() =>
+                                send({ type: "host_kick", playerId: p.id })
+                              }
+                            >
+                              Kick
+                            </button>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>
