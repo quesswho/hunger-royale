@@ -3,56 +3,116 @@ import { QRCodeSVG } from "qrcode.react";
 import type {
   ClientMessage,
   ServerMessage,
+  SimPlayer,
   Strategy,
   TournamentState,
 } from "../shared/types";
+import {
+  DEFAULT_CONFIG,
+  getAttackPower,
+  getDefenseReduction,
+} from "../shared/simulation";
+import { ArenaCanvas } from "./ArenaCanvas";
+import { StrategyChart } from "./StrategyChart";
 
-type Mode = "player" | "host";
+type Route = "player" | "projector" | "host";
 
-function getInitialMode(): Mode {
-  const params = new URLSearchParams(window.location.search);
-  return params.get("mode") === "host" ? "host" : "player";
+const HOST_PIN_STORAGE_KEY = "hunger_royale_host_pin";
+
+function getRoute(): Route {
+  const pathname = window.location.pathname.replace(/\/+$/, "");
+  if (pathname === "/host") return "host";
+  if (pathname === "/projector") return "projector";
+  return "player";
+}
+
+function sortLeaderboard(players: SimPlayer[]): SimPlayer[] {
+  return [...players].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    if (a.alive !== b.alive) return a.alive ? -1 : 1;
+    return b.kills - a.kills;
+  });
 }
 
 export function App() {
-  const [mode, setMode] = useState<Mode>(getInitialMode);
+  const route = useMemo(getRoute, []);
   const [connected, setConnected] = useState(false);
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
   const [state, setState] = useState<TournamentState>({
     phase: "lobby",
-    round: 1,
-    players: [],
+    lobbyLocked: false,
+    config: DEFAULT_CONFIG,
+    lobbyPlayers: [],
+    match: null,
   });
+  const [error, setError] = useState<string | null>(null);
+
+  // Player state
   const [name, setName] = useState("");
   const [joined, setJoined] = useState(false);
   const [strategy, setStrategy] = useState<Strategy>({
-    offenseRatio: 0.5,
     aggression: 0.5,
+    damageRatio: 0.5,
   });
   const [ready, setReady] = useState(false);
+
+  // Host state
+  const [pinInput, setPinInput] = useState("");
+  const [hostAuthed, setHostAuthed] = useState(false);
+  const [hostAuthError, setHostAuthError] = useState<string | null>(null);
+
   const wsRef = useRef<WebSocket | null>(null);
 
-  const joinUrl = useMemo(() => {
-    const url = new URL(window.location.href);
-    url.searchParams.delete("mode");
-    return url.toString();
-  }, []);
+  const joinUrl = useMemo(() => window.location.origin, []);
+  const projectorUrl = useMemo(() => `${window.location.origin}/projector`, []);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
+    ws.onopen = () => {
+      setConnected(true);
+      if (route === "host") {
+        const savedPin = sessionStorage.getItem(HOST_PIN_STORAGE_KEY);
+        if (savedPin) {
+          ws.send(JSON.stringify({ type: "host_auth", pin: savedPin }));
+        }
+      }
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      setHostAuthed(false);
+    };
+
     ws.onmessage = (event) => {
       const msg = JSON.parse(event.data) as ServerMessage;
-      if (msg.type === "welcome" || msg.type === "state") {
+      if (msg.type === "welcome") {
+        setMyPlayerId(msg.playerId);
         setState(msg.state);
+      } else if (msg.type === "state") {
+        setState(msg.state);
+      } else if (msg.type === "host_auth_result") {
+        if (msg.ok) {
+          setHostAuthed(true);
+          setHostAuthError(null);
+        } else {
+          setHostAuthed(false);
+          sessionStorage.removeItem(HOST_PIN_STORAGE_KEY);
+          setHostAuthError(msg.error ?? "Invalid host PIN.");
+        }
+      } else if (msg.type === "kicked") {
+        setJoined(false);
+        setReady(false);
+        setError(msg.message);
+      } else if (msg.type === "error") {
+        setError(msg.message);
       }
     };
 
     return () => ws.close();
-  }, []);
+  }, [route]);
 
   function send(msg: ClientMessage) {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -63,6 +123,7 @@ export function App() {
   function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    setError(null);
     send({ type: "join", name });
     setJoined(true);
   }
@@ -73,138 +134,584 @@ export function App() {
     send({ type: "update_strategy", strategy: next, ready: nextReady });
   }
 
+  function handleHostLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!pinInput.trim()) return;
+    setHostAuthError(null);
+    sessionStorage.setItem(HOST_PIN_STORAGE_KEY, pinInput.trim());
+    send({ type: "host_auth", pin: pinInput.trim() });
+    setPinInput("");
+  }
+
+  function handleHostLogout() {
+    sessionStorage.removeItem(HOST_PIN_STORAGE_KEY);
+    setHostAuthed(false);
+    wsRef.current?.close();
+  }
+
+  const readyCount = state.lobbyPlayers.filter((p) => p.ready).length;
+  const leaderboard = useMemo(
+    () => (state.match ? sortLeaderboard(state.match.players) : []),
+    [state.match]
+  );
+  const mySimPlayer = useMemo(
+    () =>
+      state.match && myPlayerId
+        ? state.match.players.find((p) => p.id === myPlayerId) ?? null
+        : null,
+    [state.match, myPlayerId]
+  );
+  const myRank = useMemo(() => {
+    if (!mySimPlayer) return null;
+    const idx = leaderboard.findIndex((p) => p.id === mySimPlayer.id);
+    return idx >= 0 ? idx + 1 : null;
+  }, [leaderboard, mySimPlayer]);
+
+  const previewAttack = Math.round(getAttackPower(strategy, state.config));
+  const previewDefensePct = Math.round(
+    getDefenseReduction(strategy, state.config) * 100
+  );
+
   return (
-    <main className="container">
+    <main className={`container ${route !== "player" ? "wide" : ""}`}>
       <header className="header">
         <div>
           <h1>Hunger Royale</h1>
           <p className="subtitle">
-            {connected ? "Connected" : "Reconnecting..."} · Round {state.round} ·{" "}
-            {state.players.length} players
+            {connected ? "Connected" : "Reconnecting..."} ·{" "}
+            {state.match
+              ? `Round ${state.match.round}/${state.config.maxRounds}`
+              : "Lobby"}{" "}
+            · {state.lobbyPlayers.length} players ({readyCount} ready)
+            {state.lobbyLocked ? " · Lobby Locked" : ""}
           </p>
         </div>
-        <div className="mode-toggle">
-          <button
-            className={mode === "player" ? "active" : ""}
-            onClick={() => setMode("player")}
-          >
-            Player
-          </button>
-          <button
-            className={mode === "host" ? "active" : ""}
-            onClick={() => setMode("host")}
-          >
-            Host / Projector
-          </button>
-        </div>
+        {route === "host" && hostAuthed && (
+          <div className="actions">
+            <a
+              className="button-link"
+              href={projectorUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open Projector
+            </a>
+            <button onClick={handleHostLogout}>Log Out</button>
+          </div>
+        )}
       </header>
 
-      {mode === "host" ? (
-        <section className="host-grid">
-          <div className="card qr-card">
-            <h2>Join the Tournament</h2>
-            <div className="qr-box">
-              <QRCodeSVG value={joinUrl} size={220} />
-            </div>
-            <p className="join-url">{joinUrl}</p>
-          </div>
+      {error && (
+        <div className="banner error" role="alert">
+          <span>{error}</span>
+          <button className="ghost" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
-          <div className="card">
-            <div className="card-header">
-              <h2>Lobby ({state.players.length})</h2>
-              <div className="actions">
+      {/* PROJECTOR VIEW (READ-ONLY) */}
+      {route === "projector" && (
+        <>
+          {!state.match ? (
+            <section className="host-grid">
+              <div className="card qr-card">
+                <h2>Scan to Join</h2>
+                <div className="qr-box">
+                  <QRCodeSVG value={joinUrl} size={240} />
+                </div>
+                <p className="join-url">{joinUrl}</p>
+                {state.lobbyLocked && (
+                  <p className="status-pill locked">Lobby Locked</p>
+                )}
+              </div>
+
+              <div className="card">
+                <div className="card-header">
+                  <h2>Lobby ({state.lobbyPlayers.length})</h2>
+                  <span className="status-pill">WAITING FOR HOST</span>
+                </div>
+                <div className="zone-legend">
+                  {state.config.zones.map((z) => (
+                    <div key={z.id} className={`zone-chip ${z.id}`}>
+                      <strong>{z.label}</strong>
+                      <span>
+                        {z.payoffMultiplier}x pts · +{z.healthRegen} HP/rd
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {state.lobbyPlayers.length === 0 ? (
+                  <p className="muted">
+                    Waiting for students to scan and join...
+                  </p>
+                ) : (
+                  <ul className="player-list">
+                    {state.lobbyPlayers.map((p) => (
+                      <li key={p.id}>
+                        <span className="player-name">
+                          <span
+                            className="color-dot"
+                            style={{ background: p.color }}
+                          />
+                          {p.name}
+                          {p.isBot && <span className="bot-tag">BOT</span>}
+                        </span>
+                        <span className={`badge ${p.ready ? "ready" : ""}`}>
+                          {p.ready ? "Ready" : "Tuning..."}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </section>
+          ) : (
+            <section className="arena-layout">
+              <div className="card arena-card">
+                <div className="card-header">
+                  <h2>Live Arena</h2>
+                  <span className="status-pill">
+                    {state.phase.toUpperCase()}
+                  </span>
+                </div>
+                <ArenaCanvas
+                  match={state.match}
+                  config={state.config}
+                  size={500}
+                />
+                <div className="zone-legend compact">
+                  {state.config.zones.map((z) => (
+                    <div key={z.id} className={`zone-chip ${z.id}`}>
+                      <strong>{z.label}</strong>
+                      <span>
+                        {z.payoffMultiplier}x · +{z.healthRegen} HP
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="side-column">
+                <div className="card">
+                  <h2>Leaderboard</h2>
+                  <div className="table-wrap">
+                    <table className="leaderboard">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Player</th>
+                          <th>Pts</th>
+                          <th>HP</th>
+                          <th>K</th>
+                          <th>Aggr / Dmg</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {leaderboard.map((p, idx) => (
+                          <tr
+                            key={p.id}
+                            className={p.alive ? "" : "eliminated"}
+                          >
+                            <td>{idx + 1}</td>
+                            <td>
+                              <span className="player-name">
+                                <span
+                                  className="color-dot"
+                                  style={{ background: p.color }}
+                                />
+                                {p.name}
+                              </span>
+                            </td>
+                            <td>
+                              <strong>{p.points.toFixed(1)}</strong>
+                            </td>
+                            <td>{p.alive ? p.hp : "KO"}</td>
+                            <td>{p.kills}</td>
+                            <td className="mono">
+                              {Math.round(p.strategy.aggression * 100)}/
+                              {Math.round(p.strategy.damageRatio * 100)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="card">
+                  <h2>Strategy Space (Size = Points)</h2>
+                  <StrategyChart players={state.match.players} />
+                </div>
+
+                <div className="card">
+                  <h2>Round Log</h2>
+                  <ul className="event-feed">
+                    {state.match.events.slice(0, 10).map((ev, i) => (
+                      <li key={i} className={`event-${ev.kind}`}>
+                        <span className="round-tag">R{ev.round}</span> {ev.text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* HOST VIEW (PIN-PROTECTED) */}
+      {route === "host" && !hostAuthed && (
+        <form className="card join-form" onSubmit={handleHostLogin}>
+          <h2>Host Authentication</h2>
+          <p className="muted">
+            Enter the Host PIN shown in your server terminal (or{" "}
+            <code>HOST_PIN</code> env var).
+          </p>
+          <input
+            type="password"
+            inputMode="numeric"
+            placeholder="Host PIN"
+            value={pinInput}
+            onChange={(e) => setPinInput(e.target.value)}
+            autoFocus
+          />
+          {hostAuthError && <p className="error-text">{hostAuthError}</p>}
+          <button className="primary" type="submit" disabled={!connected}>
+            Unlock Host Panel
+          </button>
+        </form>
+      )}
+
+      {route === "host" && hostAuthed && (
+        <>
+          <section className="card control-bar">
+            <div className="actions wrap">
+              {state.phase === "lobby" || state.phase === "results" ? (
                 <button
                   className="primary"
                   onClick={() => send({ type: "host_start" })}
                 >
-                  Start Round
+                  {state.phase === "results" ? "Run Again" : "Start Tournament"}
                 </button>
-                <button onClick={() => send({ type: "host_reset" })}>
-                  Reset
+              ) : state.phase === "running" ? (
+                <button
+                  className="primary"
+                  onClick={() => send({ type: "host_pause" })}
+                >
+                  Pause
                 </button>
+              ) : (
+                <button
+                  className="primary"
+                  onClick={() => send({ type: "host_resume" })}
+                >
+                  Resume
+                </button>
+              )}
+
+              <button
+                onClick={() => send({ type: "host_step" })}
+                disabled={state.phase === "results"}
+              >
+                Step 1 Round
+              </button>
+
+              <button
+                onClick={() =>
+                  send({
+                    type: "host_toggle_lock",
+                    locked: !state.lobbyLocked,
+                  })
+                }
+              >
+                {state.lobbyLocked ? "Unlock Lobby" : "Lock Lobby"}
+              </button>
+
+              <button
+                onClick={() => send({ type: "host_add_bots", count: 6 })}
+              >
+                +6 Bots
+              </button>
+
+              <button onClick={() => send({ type: "host_clear_bots" })}>
+                Clear Bots
+              </button>
+
+              <button onClick={() => send({ type: "host_reset" })}>
+                Reset to Lobby
+              </button>
+            </div>
+          </section>
+
+          <section className="arena-layout">
+            <div className="card arena-card">
+              {state.match ? (
+                <>
+                  <div className="card-header">
+                    <h2>Live Arena</h2>
+                    <span className="status-pill">
+                      {state.phase.toUpperCase()}
+                    </span>
+                  </div>
+                  <ArenaCanvas
+                    match={state.match}
+                    config={state.config}
+                    size={460}
+                  />
+                </>
+              ) : (
+                <div className="qr-card">
+                  <h2>Student Join QR</h2>
+                  <div className="qr-box">
+                    <QRCodeSVG value={joinUrl} size={200} />
+                  </div>
+                  <p className="join-url">{joinUrl}</p>
+                  <p className="muted small">
+                    Open <code>/projector</code> on the classroom screen to keep
+                    this admin panel private.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="side-column">
+              {state.match && (
+                <>
+                  <div className="card">
+                    <h2>Leaderboard</h2>
+                    <div className="table-wrap">
+                      <table className="leaderboard">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Player</th>
+                            <th>Pts</th>
+                            <th>HP</th>
+                            <th>K</th>
+                            <th>Aggr/Dmg</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {leaderboard.map((p, idx) => (
+                            <tr
+                              key={p.id}
+                              className={p.alive ? "" : "eliminated"}
+                            >
+                              <td>{idx + 1}</td>
+                              <td>
+                                <span className="player-name">
+                                  <span
+                                    className="color-dot"
+                                    style={{ background: p.color }}
+                                  />
+                                  {p.name}
+                                </span>
+                              </td>
+                              <td>
+                                <strong>{p.points.toFixed(1)}</strong>
+                              </td>
+                              <td>{p.alive ? p.hp : "KO"}</td>
+                              <td>{p.kills}</td>
+                              <td className="mono">
+                                {Math.round(p.strategy.aggression * 100)}/
+                                {Math.round(p.strategy.damageRatio * 100)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div className="card">
+                    <h2>Strategy Space</h2>
+                    <StrategyChart players={state.match.players} />
+                  </div>
+                </>
+              )}
+
+              <div className="card">
+                <h2>Lobby Roster ({state.lobbyPlayers.length})</h2>
+                {state.lobbyPlayers.length === 0 ? (
+                  <p className="muted">
+                    No players yet. Have students scan the QR or click{" "}
+                    <strong>+6 Bots</strong> to test.
+                  </p>
+                ) : (
+                  <ul className="player-list">
+                    {state.lobbyPlayers.map((p) => (
+                      <li key={p.id}>
+                        <span className="player-name">
+                          <span
+                            className="color-dot"
+                            style={{ background: p.color }}
+                          />
+                          {p.name}
+                          {p.isBot && <span className="bot-tag">BOT</span>}
+                        </span>
+                        <div className="player-actions">
+                          <span className={`badge ${p.ready ? "ready" : ""}`}>
+                            {p.ready ? "Ready" : "Tuning..."}
+                          </span>
+                          <button
+                            className="danger small-btn"
+                            onClick={() =>
+                              send({ type: "host_kick", playerId: p.id })
+                            }
+                          >
+                            Kick
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </div>
-            {state.players.length === 0 ? (
-              <p className="muted">Waiting for students to scan and join...</p>
-            ) : (
-              <ul className="player-list">
-                {state.players.map((p) => (
-                  <li key={p.id}>
-                    <span>{p.name}</span>
-                    <span className="badge">
-                      {p.ready ? "Ready" : "Tuning..."}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </section>
-      ) : !joined ? (
+          </section>
+        </>
+      )}
+
+      {/* PLAYER VIEW */}
+      {route === "player" && !joined && (
         <form className="card join-form" onSubmit={handleJoin}>
-          <h2>Enter Your Name</h2>
-          <input
-            type="text"
-            placeholder="e.g. Ada"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={24}
-            autoFocus
-          />
-          <button className="primary" type="submit" disabled={!connected}>
-            Join Tournament
-          </button>
+          <h2>Join Tournament</h2>
+          {state.lobbyLocked ? (
+            <p className="muted">
+              The lobby is currently locked by the host. Please wait for the
+              next round.
+            </p>
+          ) : (
+            <>
+              <input
+                type="text"
+                placeholder="Your name (e.g. Ada)"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={24}
+                autoFocus
+              />
+              <button className="primary" type="submit" disabled={!connected}>
+                Join Tournament
+              </button>
+            </>
+          )}
         </form>
-      ) : (
-        <section className="card sliders">
-          <h2>Configure Strategy</h2>
-          <label className="slider-row">
-            <div className="slider-labels">
-              <span>Health</span>
-              <span>{Math.round(strategy.offenseRatio * 100)}% Damage</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={strategy.offenseRatio}
-              onChange={(e) =>
-                updateStrategy({
-                  ...strategy,
-                  offenseRatio: Number(e.target.value),
-                })
-              }
-            />
-          </label>
+      )}
 
-          <label className="slider-row">
-            <div className="slider-labels">
-              <span>Defensive</span>
-              <span>{Math.round(strategy.aggression * 100)}% Aggressive</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={strategy.aggression}
-              onChange={(e) =>
-                updateStrategy({
-                  ...strategy,
-                  aggression: Number(e.target.value),
-                })
-              }
-            />
-          </label>
+      {route === "player" && joined && (
+        <div className="player-stack">
+          {mySimPlayer && state.match && (
+            <section className="card my-status">
+              <div className="card-header">
+                <h2>
+                  {mySimPlayer.alive ? "In Arena" : "Eliminated"} · Rank #
+                  {myRank ?? "-"}
+                </h2>
+                <span className="status-pill">
+                  {mySimPlayer.points.toFixed(1)} pts
+                </span>
+              </div>
+              <div className="stat-grid">
+                <div className="stat-box">
+                  <span className="stat-label">Health</span>
+                  <strong>
+                    {mySimPlayer.hp} / {mySimPlayer.maxHp}
+                  </strong>
+                </div>
+                <div className="stat-box">
+                  <span className="stat-label">Zone</span>
+                  <strong className="capitalize">{mySimPlayer.zone}</strong>
+                </div>
+                <div className="stat-box">
+                  <span className="stat-label">Kills</span>
+                  <strong>{mySimPlayer.kills}</strong>
+                </div>
+                <div className="stat-box">
+                  <span className="stat-label">Last Action</span>
+                  <strong className="capitalize">
+                    {mySimPlayer.lastAction}
+                  </strong>
+                </div>
+              </div>
+            </section>
+          )}
 
-          <button
-            className="primary"
-            onClick={() => updateStrategy(strategy, !ready)}
-          >
-            {ready ? "Locked In (Click to Edit)" : "Lock In Strategy"}
-          </button>
-        </section>
+          <section className="card sliders">
+            <h2>Configure Strategy</h2>
+            <label className="slider-row">
+              <div className="slider-labels">
+                <span>Defensive (Flee)</span>
+                <strong>
+                  {Math.round(strategy.aggression * 100)}% Fight Chance
+                </strong>
+                <span>Aggressive (Fight)</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={strategy.aggression}
+                disabled={state.phase === "running"}
+                onChange={(e) =>
+                  updateStrategy({
+                    ...strategy,
+                    aggression: Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+
+            <label className="slider-row">
+              <div className="slider-labels">
+                <span>Max Defense</span>
+                <strong>
+                  Atk {previewAttack} · Def {previewDefensePct}%
+                </strong>
+                <span>Max Damage</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={strategy.damageRatio}
+                disabled={state.phase === "running"}
+                onChange={(e) =>
+                  updateStrategy({
+                    ...strategy,
+                    damageRatio: Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+
+            <button
+              className="primary"
+              disabled={state.phase === "running"}
+              onClick={() => updateStrategy(strategy, !ready)}
+            >
+              {state.phase === "running"
+                ? "Match in Progress..."
+                : ready
+                ? "Locked In (Click to Edit)"
+                : "Lock In Strategy"}
+            </button>
+
+            <div className="rules-box">
+              <p>
+                <strong>Zones:</strong> Inner Core (2.0x pts, +1 HP/rd) · Middle
+                Ring (1.4x pts, +3 HP/rd) · Outer Ring (1.0x pts, +5 HP/rd).
+              </p>
+              <p>
+                <strong>Duels:</strong> When two players enter fight range, each
+                fights with probability = Aggression or flees away. A fleeing
+                player hit by an attacker takes full combat damage.
+              </p>
+            </div>
+          </section>
+        </div>
       )}
     </main>
   );
