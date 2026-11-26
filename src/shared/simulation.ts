@@ -13,7 +13,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   minMapRadius: 22,
   shrinkPerRound: 2.2,
   maxRounds: 40,
-  staleRoundsLimit: 6,
+  staleRoundsLimit: 20,
   fightRadius: 18,
   zoneGradient: 1.0,
   lethality: 0.25,
