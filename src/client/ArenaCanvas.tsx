@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MatchState, SimConfig } from "../shared/types";
 
 interface ArenaCanvasProps {
@@ -9,6 +9,12 @@ interface ArenaCanvasProps {
 
 export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [autoZoom, setAutoZoom] = useState(false);
+  const [manualZoom, setManualZoom] = useState(1);
+
+  const effectiveZoom = autoZoom
+    ? Math.min(4.5, config.initialMapRadius / Math.max(10, match.mapRadius))
+    : manualZoom;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -24,7 +30,7 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
     const cx = size / 2;
     const cy = size / 2;
     const maxPxRadius = size * 0.44;
-    const worldToPx = maxPxRadius / config.initialMapRadius;
+    const worldToPx = (maxPxRadius / config.initialMapRadius) * effectiveZoom;
     const currentPxRadius = match.mapRadius * worldToPx;
 
     // Clear background
@@ -62,10 +68,18 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
     ctx.lineWidth = 2.2;
     ctx.stroke();
 
-    // Contour rings at 33%, 66%, and 100% of R(t) with smooth multiplier labels
+    // Contour rings at 33% and 66% of R(t)
     const contours = [
-      { frac: 0.33, stroke: "rgba(251, 113, 133, 0.45)", labelColor: "rgba(253, 164, 175, 0.9)" },
-      { frac: 0.66, stroke: "rgba(251, 191, 36, 0.35)", labelColor: "rgba(253, 224, 71, 0.85)" },
+      {
+        frac: 0.33,
+        stroke: "rgba(251, 113, 133, 0.45)",
+        labelColor: "rgba(253, 164, 175, 0.9)",
+      },
+      {
+        frac: 0.66,
+        stroke: "rgba(251, 191, 36, 0.35)",
+        labelColor: "rgba(253, 224, 71, 0.85)",
+      },
     ];
     for (const c of contours) {
       const rPx = currentPxRadius * c.frac;
@@ -83,7 +97,6 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
       ctx.fillText(`${mult}x`, cx, cy - rPx + 12);
     }
 
-    // Edge and center multiplier labels
     if (currentPxRadius > 30) {
       ctx.fillStyle = "rgba(147, 197, 253, 0.85)";
       ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
@@ -188,17 +201,66 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
     ctx.font = "500 11px ui-sans-serif, system-ui, sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(
-      `Round ${match.round}/${config.maxRounds} · Radius ${match.mapRadius.toFixed(0)}`,
+      `Round ${match.round} · Radius ${match.mapRadius.toFixed(0)} · Zoom ${effectiveZoom.toFixed(1)}x`,
       12,
       20
     );
-  }, [match, config, size]);
+  }, [match, config, size, effectiveZoom]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{ width: "100%", maxWidth: size, height: "auto", aspectRatio: "1 / 1" }}
-      className="arena-canvas"
-    />
+    <div style={{ width: "100%", maxWidth: size }}>
+      <div
+        className="actions wrap"
+        style={{ justifyContent: "flex-end", marginBottom: "8px" }}
+      >
+        <button
+          type="button"
+          className={autoZoom ? "primary small-btn" : "small-btn"}
+          onClick={() => setAutoZoom((v) => !v)}
+        >
+          {autoZoom ? "Auto-Zoom: ON" : "Auto-Zoom"}
+        </button>
+        <button
+          type="button"
+          className="small-btn"
+          onClick={() => {
+            setAutoZoom(false);
+            setManualZoom((z) => Math.max(1, Number((z - 0.5).toFixed(1))));
+          }}
+        >
+          −
+        </button>
+        <button
+          type="button"
+          className="small-btn"
+          onClick={() => {
+            setAutoZoom(false);
+            setManualZoom(1);
+          }}
+        >
+          {effectiveZoom.toFixed(1)}x
+        </button>
+        <button
+          type="button"
+          className="small-btn"
+          onClick={() => {
+            setAutoZoom(false);
+            setManualZoom((z) => Math.min(4.5, Number((z + 0.5).toFixed(1))));
+          }}
+        >
+          +
+        </button>
+      </div>
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: "100%",
+          maxWidth: size,
+          height: "auto",
+          aspectRatio: "1 / 1",
+        }}
+        className="arena-canvas"
+      />
+    </div>
   );
 }

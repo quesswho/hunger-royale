@@ -463,8 +463,7 @@ export function stepRound(
     : prev.roundsWithoutDamage + 1;
   const stalemate = roundsWithoutDamage >= config.staleRoundsLimit;
 
-  const finished =
-    survivors.length <= 1 || nextRound >= config.maxRounds || stalemate;
+  const finished = survivors.length <= 1 || stalemate;
   if (finished) {
     const sorted = [...players].sort((a, b) => b.points - a.points);
     const winner = sorted[0];

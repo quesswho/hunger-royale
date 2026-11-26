@@ -212,10 +212,8 @@ export function App() {
           <h1>Hunger Royale</h1>
           <p className="subtitle">
             {connected ? "Connected" : "Reconnecting..."} ·{" "}
-            {state.match
-              ? `Round ${state.match.round}/${state.config.maxRounds}`
-              : "Lobby"}{" "}
-            · {state.lobbyPlayers.length} players ({readyCount} ready)
+            {state.match ? `Round ${state.match.round}` : "Lobby"} ·{" "}
+            {state.lobbyPlayers.length} players ({readyCount} ready)
             {state.lobbyLocked ? " · Lobby Locked" : ""}
           </p>
         </div>
