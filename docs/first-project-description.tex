@@ -2,6 +2,7 @@
 
 \usepackage[margin=2.2cm]{geometry}
 \usepackage{amsmath,amssymb}
+\usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage{titlesec}
 \usepackage{parskip}
@@ -34,6 +35,13 @@ Each player starts with normalized health $H_i(0) = 1$ (with zero regeneration i
 \Delta(d_i, d_j) = \lambda \cdot \frac{1 + d_i}{1 + (1 - d_j)}.
 \]
 Payoffs are scaled by a radial multiplier $m(r, t) = 1 + \gamma\bigl(1 - r / R(t)\bigr)$, where $\gamma \ge 0$ controls the center-to-edge risk--reward gradient. Surviving a round yields $s \cdot m(r_i, t)$, and eliminating an opponent $j$ with points $P_j$ grants a pay-off $(P_j / k) \cdot m(r_i, t)$.
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.7\textwidth]{image}
+  \caption{Snapshot of the \textbf{Hunger Royale} simulation showing the shrinking circular arena, radial payoff gradient, player trajectories, and combat encounters.}
+  \label{fig:arena}
+\end{figure}
 
 \section{Research Question and Aim}
 Our central research question is: \emph{How do continuous aggression ($a$) and damage--defense allocation ($d$) interact in a shrinking, radially weighted spatial arena, and which strategies emerge as best responses or evolutionarily stable?} Specifically, we aim to: (i) map the payoff landscape over $(a,d) \in [0,1]^2$, (ii) compare outcomes against a simplified two-player asymmetric Hawk--Dove baseline to isolate the effects of shrinking geometry and bounty payoffs, and (iii) examine how varying key parameters ($\gamma$, $\lambda$, $k$) shift the equilibrium.
