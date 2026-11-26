@@ -5,39 +5,28 @@ export interface Strategy {
   damageRatio: number;
 }
 
-export type ZoneId = "inner" | "middle" | "outer";
-
-export interface ZoneConfig {
-  id: ZoneId;
-  label: string;
-  /** Outer radius as a fraction of current map radius (0..1] */
-  maxRadiusFraction: number;
-  /** Payoff multiplier applied to survival & elimination points */
-  payoffMultiplier: number;
-  /** Constant HP regenerated per round while surviving in this zone */
-  healthRegen: number;
-}
-
 export interface SimConfig {
   initialMapRadius: number;
   minMapRadius: number;
   shrinkPerRound: number;
   maxRounds: number;
   fightRadius: number;
-  maxHealth: number;
+  /** Smooth radial payoff gradient gamma: m(r,t) = 1 + gamma * (1 - r / R(t)) */
+  zoneGradient: number;
+  /** Single combat lethality constant lambda on normalized HP in [0, 1] */
+  lethality: number;
+  /** Constant HP regenerated per round (0 in base model; normalized to [0, 1]) */
+  healthRegen: number;
   startingPoints: number;
   survivalPoints: number;
   eliminationDivisor: number;
-  baseAttack: number;
-  bonusAttack: number;
-  /** Defense reduces incoming damage by up to maxDefenseReduction (e.g. 0.55) */
-  maxDefenseReduction: number;
-  minDamage: number;
-  minMoveFraction: number;
-  maxMoveFraction: number;
+  /** Inward radial drift per round as a fraction of current map radius R(t) */
+  inwardDriftFraction: number;
+  /** Random movement noise radius per round as a fraction of R(t) */
+  moveNoiseFraction: number;
+  /** Flee step length as a fraction of R(t) */
   fleeStepFraction: number;
   roundIntervalMs: number;
-  zones: [ZoneConfig, ZoneConfig, ZoneConfig];
 }
 
 export interface LobbyPlayer {
@@ -61,13 +50,14 @@ export interface SimPlayer {
   y: number;
   prevX: number;
   prevY: number;
+  /** Normalized health in [0, 1] */
   hp: number;
-  maxHp: number;
   points: number;
   kills: number;
   alive: boolean;
   eliminatedRound: number | null;
-  zone: ZoneId;
+  /** Current radial payoff multiplier m(r, t) */
+  multiplier: number;
   lastAction: PlayerActionKind;
   targetId: string | null;
   lastDamageTaken: number;

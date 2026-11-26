@@ -7,11 +7,7 @@ import type {
   Strategy,
   TournamentState,
 } from "../shared/types";
-import {
-  DEFAULT_CONFIG,
-  getAttackPower,
-  getDefenseReduction,
-} from "../shared/simulation";
+import { computeDamage, DEFAULT_CONFIG } from "../shared/simulation";
 import { ArenaCanvas } from "./ArenaCanvas";
 import { StrategyChart } from "./StrategyChart";
 
@@ -167,10 +163,15 @@ export function App() {
     return idx >= 0 ? idx + 1 : null;
   }, [leaderboard, mySimPlayer]);
 
-  const previewAttack = Math.round(getAttackPower(strategy, state.config));
-  const previewDefensePct = Math.round(
-    getDefenseReduction(strategy, state.config) * 100
+  // Preview combat exchange against a balanced (0.5) opponent
+  const balancedOpp: Strategy = { aggression: 0.5, damageRatio: 0.5 };
+  const previewDealPct = Math.round(
+    computeDamage(strategy, balancedOpp, state.config) * 100
   );
+  const previewTakePct = Math.round(
+    computeDamage(balancedOpp, strategy, state.config) * 100
+  );
+  const maxMultiplier = (1 + state.config.zoneGradient).toFixed(1);
 
   return (
     <main className={`container ${route !== "player" ? "wide" : ""}`}>
@@ -232,14 +233,20 @@ export function App() {
                   <span className="status-pill">WAITING FOR HOST</span>
                 </div>
                 <div className="zone-legend">
-                  {state.config.zones.map((z) => (
-                    <div key={z.id} className={`zone-chip ${z.id}`}>
-                      <strong>{z.label}</strong>
-                      <span>
-                        {z.payoffMultiplier}x pts · +{z.healthRegen} HP/rd
-                      </span>
-                    </div>
-                  ))}
+                  <div className="zone-chip inner">
+                    <strong>Center</strong>
+                    <span>{maxMultiplier}x payoff</span>
+                  </div>
+                  <div className="zone-chip middle">
+                    <strong>Mid-Radius</strong>
+                    <span>
+                      {(1 + state.config.zoneGradient * 0.5).toFixed(1)}x payoff
+                    </span>
+                  </div>
+                  <div className="zone-chip outer">
+                    <strong>Edge</strong>
+                    <span>1.0x payoff</span>
+                  </div>
                 </div>
                 {state.lobbyPlayers.length === 0 ? (
                   <p className="muted">
@@ -280,16 +287,11 @@ export function App() {
                   config={state.config}
                   size={500}
                 />
-                <div className="zone-legend compact">
-                  {state.config.zones.map((z) => (
-                    <div key={z.id} className={`zone-chip ${z.id}`}>
-                      <strong>{z.label}</strong>
-                      <span>
-                        {z.payoffMultiplier}x · +{z.healthRegen} HP
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <p className="muted small">
+                  Payoff multiplier scales smoothly from <strong>1.0x</strong>{" "}
+                  at the edge to <strong>{maxMultiplier}x</strong> at the
+                  center.
+                </p>
               </div>
 
               <div className="side-column">
@@ -326,7 +328,7 @@ export function App() {
                             <td>
                               <strong>{p.points.toFixed(1)}</strong>
                             </td>
-                            <td>{p.alive ? p.hp : "KO"}</td>
+                            <td>{p.alive ? `${Math.round(p.hp * 100)}%` : "KO"}</td>
                             <td>{p.kills}</td>
                             <td className="mono">
                               {Math.round(p.strategy.aggression * 100)}/
@@ -511,7 +513,9 @@ export function App() {
                               <td>
                                 <strong>{p.points.toFixed(1)}</strong>
                               </td>
-                              <td>{p.alive ? p.hp : "KO"}</td>
+                              <td>
+                                {p.alive ? `${Math.round(p.hp * 100)}%` : "KO"}
+                              </td>
                               <td>{p.kills}</td>
                               <td className="mono">
                                 {Math.round(p.strategy.aggression * 100)}/
@@ -615,13 +619,11 @@ export function App() {
               <div className="stat-grid">
                 <div className="stat-box">
                   <span className="stat-label">Health</span>
-                  <strong>
-                    {mySimPlayer.hp} / {mySimPlayer.maxHp}
-                  </strong>
+                  <strong>{Math.round(mySimPlayer.hp * 100)}%</strong>
                 </div>
                 <div className="stat-box">
-                  <span className="stat-label">Zone</span>
-                  <strong className="capitalize">{mySimPlayer.zone}</strong>
+                  <span className="stat-label">Zone Multiplier</span>
+                  <strong>{mySimPlayer.multiplier.toFixed(2)}x</strong>
                 </div>
                 <div className="stat-box">
                   <span className="stat-label">Kills</span>
@@ -667,7 +669,7 @@ export function App() {
               <div className="slider-labels">
                 <span>Max Defense</span>
                 <strong>
-                  Atk {previewAttack} · Def {previewDefensePct}%
+                  Deal {previewDealPct}% · Take {previewTakePct}% (vs 50/50)
                 </strong>
                 <span>Max Damage</span>
               </div>
@@ -701,13 +703,15 @@ export function App() {
 
             <div className="rules-box">
               <p>
-                <strong>Zones:</strong> Inner Core (2.0x pts, +1 HP/rd) · Middle
-                Ring (1.4x pts, +3 HP/rd) · Outer Ring (1.0x pts, +5 HP/rd).
+                <strong>Payoff Gradient:</strong> Scales smoothly from{" "}
+                <strong>1.0x</strong> at the edge to{" "}
+                <strong>{maxMultiplier}x</strong> at the center as the arena
+                shrinks.
               </p>
               <p>
                 <strong>Duels:</strong> When two players enter fight range, each
                 fights with probability = Aggression or flees away. A fleeing
-                player hit by an attacker takes full combat damage.
+                player hit by an attacker still takes combat damage.
               </p>
             </div>
           </section>

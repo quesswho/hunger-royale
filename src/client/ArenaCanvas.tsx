@@ -25,6 +25,7 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
     const cy = size / 2;
     const maxPxRadius = size * 0.44;
     const worldToPx = maxPxRadius / config.initialMapRadius;
+    const currentPxRadius = match.mapRadius * worldToPx;
 
     // Clear background
     ctx.fillStyle = "#080d1a";
@@ -40,50 +41,60 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
     ctx.stroke();
     ctx.restore();
 
-    // Draw shrinking circular zones (outer -> middle -> inner)
-    const zoneStyles: Record<
-      string,
-      { fill: string; stroke: string; labelColor: string }
-    > = {
-      outer: {
-        fill: "rgba(30, 58, 138, 0.25)",
-        stroke: "rgba(96, 165, 250, 0.55)",
-        labelColor: "rgba(147, 197, 253, 0.85)",
-      },
-      middle: {
-        fill: "rgba(180, 83, 9, 0.24)",
-        stroke: "rgba(251, 191, 36, 0.55)",
-        labelColor: "rgba(253, 224, 71, 0.9)",
-      },
-      inner: {
-        fill: "rgba(190, 18, 60, 0.28)",
-        stroke: "rgba(251, 113, 133, 0.7)",
-        labelColor: "rgba(253, 164, 175, 0.95)",
-      },
-    };
+    // Smooth radial payoff gradient inside R(t)
+    const grad = ctx.createRadialGradient(
+      cx,
+      cy,
+      0,
+      cx,
+      cy,
+      Math.max(1, currentPxRadius)
+    );
+    grad.addColorStop(0, "rgba(225, 29, 72, 0.34)");
+    grad.addColorStop(0.5, "rgba(217, 119, 6, 0.22)");
+    grad.addColorStop(1, "rgba(30, 58, 138, 0.22)");
 
-    const zonesDesc = [...config.zones].reverse();
-    for (const z of zonesDesc) {
-      const rPx = match.mapRadius * z.maxRadiusFraction * worldToPx;
-      const style = zoneStyles[z.id];
+    ctx.beginPath();
+    ctx.arc(cx, cy, currentPxRadius, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(96, 165, 250, 0.7)";
+    ctx.lineWidth = 2.2;
+    ctx.stroke();
+
+    // Contour rings at 33%, 66%, and 100% of R(t) with smooth multiplier labels
+    const contours = [
+      { frac: 0.33, stroke: "rgba(251, 113, 133, 0.45)", labelColor: "rgba(253, 164, 175, 0.9)" },
+      { frac: 0.66, stroke: "rgba(251, 191, 36, 0.35)", labelColor: "rgba(253, 224, 71, 0.85)" },
+    ];
+    for (const c of contours) {
+      const rPx = currentPxRadius * c.frac;
+      if (rPx < 14) continue;
       ctx.beginPath();
       ctx.arc(cx, cy, rPx, 0, Math.PI * 2);
-      ctx.fillStyle = style.fill;
-      ctx.fill();
-      ctx.strokeStyle = style.stroke;
-      ctx.lineWidth = z.id === "outer" ? 2.2 : 1.3;
+      ctx.strokeStyle = c.stroke;
+      ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Zone multiplier label at top of ring
-      if (rPx > 20) {
-        ctx.fillStyle = style.labelColor;
-        ctx.font = "600 11px ui-sans-serif, system-ui, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText(`${z.payoffMultiplier}x`, cx, cy - rPx + 14);
-      }
+      const mult = (1 + config.zoneGradient * (1 - c.frac)).toFixed(2);
+      ctx.fillStyle = c.labelColor;
+      ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(`${mult}x`, cx, cy - rPx + 12);
     }
 
-    // Draw movement trails & flee indicators
+    // Edge and center multiplier labels
+    if (currentPxRadius > 30) {
+      ctx.fillStyle = "rgba(147, 197, 253, 0.85)";
+      ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("1.00x", cx, cy - currentPxRadius + 13);
+
+      ctx.fillStyle = "rgba(253, 164, 175, 0.95)";
+      ctx.fillText(`${(1 + config.zoneGradient).toFixed(2)}x`, cx, cy + 4);
+    }
+
+    // Movement trails & flee indicators
     for (const p of match.players) {
       if (!p.alive && p.eliminatedRound !== match.round) continue;
       const x1 = cx + p.prevX * worldToPx;
@@ -96,7 +107,7 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
         ctx.lineTo(x2, y2);
         ctx.strokeStyle =
           p.lastAction === "flee"
-            ? "rgba(56, 189, 248, 0.7)"
+            ? "rgba(56, 189, 248, 0.75)"
             : "rgba(148, 163, 184, 0.35)";
         ctx.lineWidth = p.lastAction === "flee" ? 2 : 1.25;
         ctx.setLineDash(p.lastAction === "flee" ? [4, 3] : []);
@@ -105,7 +116,7 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
       }
     }
 
-    // Draw combat attack lines
+    // Combat attack lines
     for (const line of match.combatLines) {
       const x1 = cx + line.fromX * worldToPx;
       const y1 = cy + line.fromY * worldToPx;
@@ -119,7 +130,7 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
       ctx.stroke();
     }
 
-    // Draw eliminated players (faded X)
+    // Eliminated players (faded X)
     for (const p of match.players) {
       if (p.alive) continue;
       const px = cx + p.x * worldToPx;
@@ -134,13 +145,12 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
       ctx.stroke();
     }
 
-    // Draw alive players
+    // Alive players
     for (const p of match.players) {
       if (!p.alive) continue;
       const px = cx + p.x * worldToPx;
       const py = cy + p.y * worldToPx;
 
-      // Subtle fight radius halo for fighting players
       if (p.lastAction === "fight") {
         ctx.beginPath();
         ctx.arc(px, py, config.fightRadius * worldToPx * 0.5, 0, Math.PI * 2);
@@ -149,7 +159,6 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
         ctx.stroke();
       }
 
-      // Player dot
       ctx.beginPath();
       ctx.arc(px, py, 7, 0, Math.PI * 2);
       ctx.fillStyle = p.color;
@@ -158,17 +167,16 @@ export function ArenaCanvas({ match, config, size = 480 }: ArenaCanvasProps) {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Mini health bar above dot
+      // Normalized HP bar [0, 1]
       const barW = 26;
       const barH = 4;
-      const hpPct = Math.max(0, Math.min(1, p.hp / p.maxHp));
+      const hpPct = Math.max(0, Math.min(1, p.hp));
       ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
       ctx.fillRect(px - barW / 2, py - 15, barW, barH);
       ctx.fillStyle =
         hpPct > 0.5 ? "#4ade80" : hpPct > 0.25 ? "#facc15" : "#f43f5e";
       ctx.fillRect(px - barW / 2, py - 15, barW * hpPct, barH);
 
-      // Name label
       ctx.fillStyle = "#f8fafc";
       ctx.font = "600 10px ui-sans-serif, system-ui, sans-serif";
       ctx.textAlign = "center";

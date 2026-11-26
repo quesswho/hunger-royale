@@ -6,8 +6,6 @@ import type {
   SimConfig,
   SimPlayer,
   Strategy,
-  ZoneConfig,
-  ZoneId,
 } from "./types.js";
 
 export const DEFAULT_CONFIG: SimConfig = {
@@ -16,41 +14,16 @@ export const DEFAULT_CONFIG: SimConfig = {
   shrinkPerRound: 2.2,
   maxRounds: 40,
   fightRadius: 18,
-  maxHealth: 100,
+  zoneGradient: 1.0,
+  lethality: 0.25,
+  healthRegen: 0,
   startingPoints: 20,
   survivalPoints: 10,
   eliminationDivisor: 2,
-  baseAttack: 14,
-  bonusAttack: 30,
-  maxDefenseReduction: 0.55,
-  minDamage: 4,
-  minMoveFraction: 0.08,
-  maxMoveFraction: 0.28,
+  inwardDriftFraction: 0.08,
+  moveNoiseFraction: 0.16,
   fleeStepFraction: 0.22,
   roundIntervalMs: 900,
-  zones: [
-    {
-      id: "inner",
-      label: "Inner Core",
-      maxRadiusFraction: 0.35,
-      payoffMultiplier: 2.0,
-      healthRegen: 1,
-    },
-    {
-      id: "middle",
-      label: "Middle Ring",
-      maxRadiusFraction: 0.7,
-      payoffMultiplier: 1.4,
-      healthRegen: 3,
-    },
-    {
-      id: "outer",
-      label: "Outer Ring",
-      maxRadiusFraction: 1.0,
-      payoffMultiplier: 1.0,
-      healthRegen: 5,
-    },
-  ],
 };
 
 /** Simple deterministic Mulberry32 PRNG */
@@ -70,41 +43,35 @@ export function clamp01(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-export function getAttackPower(strategy: Strategy, config: SimConfig): number {
-  return config.baseAttack + clamp01(strategy.damageRatio) * config.bonusAttack;
-}
-
-export function getDefenseReduction(
-  strategy: Strategy,
-  config: SimConfig
-): number {
-  return (1 - clamp01(strategy.damageRatio)) * config.maxDefenseReduction;
-}
-
+/**
+ * Single dimensionless combat formula on normalized HP in [0, 1]:
+ *   dmg(i -> j) = lambda * (1 + d_i) / (1 + (1 - d_j))
+ */
 export function computeDamage(
   attacker: Strategy,
   defender: Strategy,
   config: SimConfig
 ): number {
-  const rawAttack = getAttackPower(attacker, config);
-  const reduction = getDefenseReduction(defender, config);
-  return Math.max(config.minDamage, Math.round(rawAttack * (1 - reduction)));
+  const dAtt = clamp01(attacker.damageRatio);
+  const dDef = clamp01(defender.damageRatio);
+  return config.lethality * ((1 + dAtt) / (1 + (1 - dDef)));
 }
 
-export function getZoneConfig(
+/**
+ * Smooth radial payoff multiplier:
+ *   m(r, t) = 1 + gamma * (1 - r / R(t))
+ */
+export function getPayoffMultiplier(
   x: number,
   y: number,
   mapRadius: number,
   config: SimConfig
-): ZoneConfig {
-  const dist = Math.hypot(x, y);
-  const fraction = mapRadius > 0 ? dist / mapRadius : 0;
-  for (const zone of config.zones) {
-    if (fraction <= zone.maxRadiusFraction) {
-      return zone;
-    }
-  }
-  return config.zones[config.zones.length - 1];
+): number {
+  if (mapRadius <= 0) return 1 + config.zoneGradient;
+  const r = Math.min(mapRadius, Math.hypot(x, y));
+  return Number(
+    (1 + config.zoneGradient * (1 - r / mapRadius)).toFixed(2)
+  );
 }
 
 export function clampToMap(
@@ -118,32 +85,6 @@ export function clampToMap(
   }
   const scale = (mapRadius * 0.995) / dist;
   return { x: x * scale, y: y * scale };
-}
-
-/**
- * Sample a point inside the circular map weighted by each zone's payoff multiplier.
- * Uses exact rejection sampling over the playable disk.
- */
-function sampleRewardWeightedPoint(
-  mapRadius: number,
-  config: SimConfig,
-  rng: () => number
-): { x: number; y: number } {
-  const maxMultiplier = Math.max(
-    ...config.zones.map((z) => z.payoffMultiplier)
-  );
-
-  for (let attempt = 0; attempt < 40; attempt++) {
-    const angle = rng() * Math.PI * 2;
-    const radius = Math.sqrt(rng()) * mapRadius;
-    const x = Math.cos(angle) * radius;
-    const y = Math.sin(angle) * radius;
-    const zone = getZoneConfig(x, y, mapRadius, config);
-    if (rng() <= zone.payoffMultiplier / maxMultiplier) {
-      return { x, y };
-    }
-  }
-  return { x: 0, y: 0 };
 }
 
 /**
@@ -170,7 +111,6 @@ function computeFleePosition(
   );
   let bestDist = Math.hypot(best.x - oppX, best.y - oppY);
 
-  // Sample 24 candidate directions around the player (handles boundary sliding cleanly)
   const samples = 24;
   for (let i = 0; i < samples; i++) {
     const angle = awayBaseAngle + (i / samples) * Math.PI * 2;
@@ -197,17 +137,14 @@ export function createInitialMatch(
   const rng = createRng(seed);
   const count = Math.max(1, lobbyPlayers.length);
 
-  // Spawn players evenly around the outer/middle area with light jitter
   const players: SimPlayer[] = lobbyPlayers.map((lp, index) => {
     const baseAngle = (index / count) * Math.PI * 2 + (rng() - 0.5) * 0.35;
-    const spawnRadius =
-      config.initialMapRadius * (0.55 + rng() * 0.38);
+    const spawnRadius = config.initialMapRadius * (0.55 + rng() * 0.38);
     const pos = clampToMap(
       Math.cos(baseAngle) * spawnRadius,
       Math.sin(baseAngle) * spawnRadius,
       config.initialMapRadius
     );
-    const zone = getZoneConfig(pos.x, pos.y, config.initialMapRadius, config);
 
     return {
       id: lp.id,
@@ -222,13 +159,17 @@ export function createInitialMatch(
       y: pos.y,
       prevX: pos.x,
       prevY: pos.y,
-      hp: config.maxHealth,
-      maxHp: config.maxHealth,
+      hp: 1,
       points: config.startingPoints,
       kills: 0,
       alive: true,
       eliminatedRound: null,
-      zone: zone.id,
+      multiplier: getPayoffMultiplier(
+        pos.x,
+        pos.y,
+        config.initialMapRadius,
+        config
+      ),
       lastAction: "move",
       targetId: null,
       lastDamageTaken: 0,
@@ -265,12 +206,15 @@ export function stepRound(
   // 1. Shrink map radius
   const nextRadius = Math.max(
     config.minMapRadius,
-    Number((config.initialMapRadius - config.shrinkPerRound * nextRound).toFixed(2))
+    Number(
+      (config.initialMapRadius - config.shrinkPerRound * nextRound).toFixed(2)
+    )
   );
 
-  // Clone players and record previous positions; pull inside shrunken map if needed
   const players: SimPlayer[] = prev.players.map((p) => {
-    const clamped = p.alive ? clampToMap(p.x, p.y, nextRadius) : { x: p.x, y: p.y };
+    const clamped = p.alive
+      ? clampToMap(p.x, p.y, nextRadius)
+      : { x: p.x, y: p.y };
     return {
       ...p,
       prevX: p.x,
@@ -285,11 +229,9 @@ export function stepRound(
 
   const byId = new Map(players.map((p) => [p.id, p]));
   const alivePlayers = players.filter((p) => p.alive);
-
-  // Snapshot points at the start of the round for simultaneous elimination payoffs
   const startPoints = new Map(alivePlayers.map((p) => [p.id, p.points]));
 
-  // 2. Determine engagements: anyone within fightRadius of another alive player
+  // 2. Detect engagements within fightRadius
   const nearestOpponent = new Map<string, { id: string; dist: number }>();
   for (const p of alivePlayers) {
     let bestId: string | null = null;
@@ -307,7 +249,7 @@ export function stepRound(
     }
   }
 
-  // 3. Decide simultaneous actions for every alive player
+  // 3. Simultaneous decisions
   const decisions = new Map<
     string,
     { kind: "move" | "fight" | "flee"; targetId: string | null }
@@ -316,7 +258,6 @@ export function stepRound(
   for (const p of alivePlayers) {
     const engaged = nearestOpponent.get(p.id);
     if (engaged) {
-      // Fight with probability = aggression, otherwise Flee
       const willFight = rng() < p.strategy.aggression;
       decisions.set(p.id, {
         kind: willFight ? "fight" : "flee",
@@ -327,7 +268,7 @@ export function stepRound(
     }
   }
 
-  // 4. Resolve movements (for "move" and "flee") simultaneously from start positions
+  // 4. Resolve movements simultaneously (radial inward drift + uniform disk noise)
   const startPos = new Map(alivePlayers.map((p) => [p.id, { x: p.x, y: p.y }]));
   const nextPositions = new Map<string, { x: number; y: number }>();
 
@@ -345,27 +286,22 @@ export function stepRound(
         computeFleePosition(pos.x, pos.y, oppPos.x, oppPos.y, stepLen, nextRadius)
       );
     } else {
-      // Semi-random greedy movement weighted by zone rewards
-      const target = sampleRewardWeightedPoint(nextRadius, config, rng);
-      const dx = target.x - pos.x;
-      const dy = target.y - pos.y;
-      const distToTarget = Math.hypot(dx, dy);
-      const minStep = config.minMoveFraction * nextRadius;
-      const maxStep = config.maxMoveFraction * nextRadius;
-      const stepLen = minStep + rng() * (maxStep - minStep);
+      const distFromCenter = Math.hypot(pos.x, pos.y);
+      const driftLen = config.inwardDriftFraction * nextRadius;
+      const driftX =
+        distFromCenter > 1e-6 ? (-pos.x / distFromCenter) * driftLen : 0;
+      const driftY =
+        distFromCenter > 1e-6 ? (-pos.y / distFromCenter) * driftLen : 0;
 
-      if (distToTarget === 0) {
-        nextPositions.set(p.id, pos);
-      } else {
-        const moveDist = Math.min(stepLen, distToTarget);
-        const nx = pos.x + (dx / distToTarget) * moveDist;
-        const ny = pos.y + (dy / distToTarget) * moveDist;
-        nextPositions.set(p.id, clampToMap(nx, ny, nextRadius));
-      }
+      const noiseAngle = rng() * Math.PI * 2;
+      const noiseLen = rng() * config.moveNoiseFraction * nextRadius;
+      const nx = pos.x + driftX + Math.cos(noiseAngle) * noiseLen;
+      const ny = pos.y + driftY + Math.sin(noiseAngle) * noiseLen;
+      nextPositions.set(p.id, clampToMap(nx, ny, nextRadius));
     }
   }
 
-  // 5. Resolve attacks & damage simultaneously
+  // 5. Resolve combat simultaneously
   const incomingDamage = new Map<string, number>();
   const attackersOf = new Map<string, string[]>();
   const combatLines: CombatLine[] = [];
@@ -398,20 +334,16 @@ export function stepRound(
           eliminated: false,
         });
 
+        const dmgPct = Math.round(dmg * 100);
         const targetDecision = decisions.get(target.id);
-        if (targetDecision?.kind === "flee") {
-          roundEvents.push({
-            round: nextRound,
-            text: `${p.name} struck fleeing ${target.name} for ${dmg} dmg`,
-            kind: "fight",
-          });
-        } else {
-          roundEvents.push({
-            round: nextRound,
-            text: `${p.name} hit ${target.name} for ${dmg} dmg`,
-            kind: "fight",
-          });
-        }
+        roundEvents.push({
+          round: nextRound,
+          text:
+            targetDecision?.kind === "flee"
+              ? `${p.name} struck fleeing ${target.name} (-${dmgPct}% HP)`
+              : `${p.name} hit ${target.name} (-${dmgPct}% HP)`,
+          kind: "fight",
+        });
       }
     } else if (decision.kind === "flee" && decision.targetId) {
       const opp = byId.get(decision.targetId);
@@ -426,21 +358,21 @@ export function stepRound(
     }
   }
 
-  // Apply positions, zone updates, and damage
+  // Apply positions, multipliers, and damage
   for (const p of alivePlayers) {
     const pos = nextPositions.get(p.id)!;
     p.x = pos.x;
     p.y = pos.y;
-    p.zone = getZoneConfig(p.x, p.y, nextRadius, config).id as ZoneId;
+    p.multiplier = getPayoffMultiplier(p.x, p.y, nextRadius, config);
 
     const dmg = incomingDamage.get(p.id) ?? 0;
     if (dmg > 0) {
-      p.hp = Math.max(0, p.hp - dmg);
+      p.hp = Math.max(0, Number((p.hp - dmg).toFixed(4)));
       p.lastDamageTaken = dmg;
     }
   }
 
-  // 6. Process eliminations & elimination payoffs (scaled by killer's zone multiplier)
+  // 6. Process eliminations & bounty payoffs scaled by killer's multiplier
   const eliminatedThisRound = alivePlayers.filter((p) => p.hp <= 0);
   for (const victim of eliminatedThisRound) {
     victim.alive = false;
@@ -456,8 +388,7 @@ export function stepRound(
       for (const killerId of killers) {
         const killer = byId.get(killerId);
         if (!killer) continue;
-        const killerZone = getZoneConfig(killer.x, killer.y, nextRadius, config);
-        const award = Number((share * killerZone.payoffMultiplier).toFixed(1));
+        const award = Number((share * killer.multiplier).toFixed(1));
         killer.points = Number((killer.points + award).toFixed(1));
         killer.lastPointsGained = Number((killer.lastPointsGained + award).toFixed(1));
         killer.kills += 1;
@@ -470,23 +401,24 @@ export function stepRound(
 
         roundEvents.push({
           round: nextRound,
-          text: `${killer.name} eliminated ${victim.name} (+${award} pts, ${killerZone.payoffMultiplier}x zone)`,
+          text: `${killer.name} eliminated ${victim.name} (+${award} pts at ${killer.multiplier.toFixed(2)}x)`,
           kind: "elimination",
         });
       }
     }
   }
 
-  // 7. Survival payoff + constant zone-based health regeneration for survivors
+  // 7. Survival payoff + constant health regeneration (0 in base model)
   const survivors = players.filter((p) => p.alive);
   for (const p of survivors) {
-    const zone = getZoneConfig(p.x, p.y, nextRadius, config);
     const survivalAward = Number(
-      (config.survivalPoints * zone.payoffMultiplier).toFixed(1)
+      (config.survivalPoints * p.multiplier).toFixed(1)
     );
     p.points = Number((p.points + survivalAward).toFixed(1));
     p.lastPointsGained = Number((p.lastPointsGained + survivalAward).toFixed(1));
-    p.hp = Math.min(p.maxHp, p.hp + zone.healthRegen);
+    if (config.healthRegen > 0) {
+      p.hp = Math.min(1, Number((p.hp + config.healthRegen).toFixed(4)));
+    }
   }
 
   const finished = survivors.length <= 1 || nextRound >= config.maxRounds;
