@@ -10,6 +10,8 @@ export interface SimConfig {
   minMapRadius: number;
   shrinkPerRound: number;
   maxRounds: number;
+  /** End the match early after this many consecutive rounds with zero damage */
+  staleRoundsLimit: number;
   fightRadius: number;
   /** Smooth radial payoff gradient gamma: m(r,t) = 1 + gamma * (1 - r / R(t)) */
   zoneGradient: number;
@@ -85,6 +87,7 @@ export interface RoundEvent {
 export interface MatchState {
   round: number;
   mapRadius: number;
+  roundsWithoutDamage: number;
   players: SimPlayer[];
   combatLines: CombatLine[];
   events: RoundEvent[];

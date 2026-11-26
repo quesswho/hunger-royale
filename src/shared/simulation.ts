@@ -13,6 +13,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   minMapRadius: 22,
   shrinkPerRound: 2.2,
   maxRounds: 40,
+  staleRoundsLimit: 6,
   fightRadius: 18,
   zoneGradient: 1.0,
   lethality: 0.25,
@@ -201,6 +202,7 @@ export function createInitialMatch(
   return {
     round: 0,
     mapRadius: config.initialMapRadius,
+    roundsWithoutDamage: 0,
     players,
     combatLines: [],
     events: [
@@ -453,15 +455,27 @@ export function stepRound(
     }
   }
 
-  const finished = survivors.length <= 1 || nextRound >= config.maxRounds;
+  const anyDamageThisRound = Array.from(incomingDamage.values()).some(
+    (d) => d > 0
+  );
+  const roundsWithoutDamage = anyDamageThisRound
+    ? 0
+    : prev.roundsWithoutDamage + 1;
+  const stalemate = roundsWithoutDamage >= config.staleRoundsLimit;
+
+  const finished =
+    survivors.length <= 1 || nextRound >= config.maxRounds || stalemate;
   if (finished) {
     const sorted = [...players].sort((a, b) => b.points - a.points);
     const winner = sorted[0];
+    const reason = stalemate
+      ? `Stalemate (${config.staleRoundsLimit} rounds with no damage)`
+      : "Tournament finished";
     roundEvents.push({
       round: nextRound,
       text: winner
-        ? `Tournament finished! ${winner.name} leads with ${winner.points.toFixed(1)} pts.`
-        : "Tournament finished!",
+        ? `${reason}! ${winner.name} wins with ${winner.points.toFixed(1)} pts.`
+        : `${reason}!`,
       kind: "info",
     });
   }
@@ -471,6 +485,7 @@ export function stepRound(
   return {
     round: nextRound,
     mapRadius: nextRadius,
+    roundsWithoutDamage,
     players,
     combatLines,
     events: combinedEvents,
