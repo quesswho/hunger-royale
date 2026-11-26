@@ -11,7 +11,7 @@
 
 \title{\vspace{-1.4cm}\textbf{Hunger Royale: Continuous Strategy Selection in a Shrinking Spatial Arena}\\[4pt]
 \large First Project Description}
-\author{Group Members: \textit{[Insert Group Member Names]}}
+\author{Group Members: \textit{Erik Albinsson, Sebastian Miles}}
 \date{November 26, 2026}
 
 \begin{document}
@@ -29,7 +29,7 @@ We model an $N$-player simultaneous-move game over discrete rounds $t = 1, \dots
   \item \textbf{Aggression ($a_i$):} Probability of choosing \emph{Fight} ($a_i$) versus \emph{Flee} ($1-a_i$) when within another player's fight radius.
   \item \textbf{Damage vs.\ Defense ($d_i$):} Continuous trade-off between offensive power and defensive mitigation.
 \end{itemize}
-Each player starts with normalized health $H_i(0) = 1$ (with zero regeneration in the base model) and initial points $P_0$. Each round is resolved simultaneously. Unengaged players move via a radial inward drift toward the center combined with random directional noise, clamped to the boundary $R(t)$. Players within fight radius simultaneously choose \emph{Fight} or \emph{Flee}: if both fight, both deal damage; if one flees and the other fights, the fleeing player moves in the boundary-constrained direction maximizing distance from the opponent while still taking damage; if both flee, both separate without damage. Damage from player $i$ to $j$ is governed by a single lethality constant $\lambda > 0$:
+Each player starts with normalized health $H_i(0) = 1$ (with zero regeneration in the base model) and initial points $P_0$. Each round is resolved simultaneously. Unengaged players move by sampling a direction in the range $U(0,2\pi)$ and step-size from a Uniform distribution $U(0.5,1.5)$, clamped to the boundary $R(t)$. Players within fight radius simultaneously choose \emph{Fight} or \emph{Flee}: if both fight, both deal full combat damage; if one flees and the other fights, the fleeing player moves in the boundary-constrained direction maximizing distance from the opponent while taking reduced damage $\rho \cdot \Delta(d_i, d_j)$ with flee-damage factor $\rho \in [0, 1)$; if both flee, both separate without damage. Damage from player $i$ to $j$ is governed by a single lethality constant $\lambda > 0$:
 \[
 \Delta(d_i, d_j) = \lambda \cdot \frac{1 + d_i}{1 + (1 - d_j)}.
 \]
@@ -43,11 +43,11 @@ We combine analytical benchmarking with agent-based simulation:
 \begin{enumerate}\itemsep2pt
   \item \textbf{Analytical Baseline:} Derive a tractable two-player asymmetric Hawk--Dove model using the same $(a, d)$ strategy space and lethality function $\Delta(d_i, d_j)$ to establish baseline best responses and ESS conditions.
   \item \textbf{Monte Carlo \& Evolutionary Simulation:} Implement a seeded simulation engine to run large-scale multi-player tournaments across grids of $(a, d) \in [0,1]^2$, estimate empirical payoff matrices, and apply replicator dynamics to identify stable pure or mixed strategy populations.
-  \item \textbf{Sensitivity \& Extension Analysis:} Conduct parameter sweeps over the payoff gradient $\gamma$, combat lethality $\lambda$, shrink rate $\delta$, and bounty divisor $k$, and test how adding outer-zone health regeneration alters the spatial risk--reward equilibrium.
+  \item \textbf{Sensitivity \& Extension Analysis:} Conduct parameter sweeps over the payoff gradient $\gamma$, combat lethality $\lambda$, flee-damage factor $\rho$, shrink rate $\delta$, and bounty divisor $k$, and test how adding outer-zone health regeneration alters the spatial risk--reward equilibrium.
 \end{enumerate}
 
 \section{Scope and Limitations}
-To keep the model parsimonious and analyzable within the course timeframe, we adopt several deliberate simplifications: strategies $(a_i, d_i)$ are fixed throughout a match and do not condition on current health, position, or remaining players; unengaged movement follows a stochastic inward-drift heuristic rather than optimal path-planning; and close-range encounters are resolved against the nearest opponent without explicit alliances or coalitions. These abstractions isolate the core interaction between aggression, capability investment, and shrinking spatial pressure while leaving state-dependent policies as natural extensions.
+To keep the model parsimonious and analyzable within the course timeframe, we adopt several deliberate simplifications: strategies $(a_i, d_i)$ are fixed throughout a match and do not condition on current health, position, or remaining players; unengaged movement follows a stochastic random-walk heuristic rather than optimal path-planning; and close-range encounters are resolved against the nearest opponent without explicit alliances or coalitions. These abstractions isolate the core interaction between aggression, capability investment, and shrinking spatial pressure while leaving state-dependent policies as natural extensions.
 
 \begin{thebibliography}{9}\itemsep1pt
 \small
@@ -55,5 +55,6 @@ To keep the model parsimonious and analyzable within the course timeframe, we ad
 \bibitem{maynard1982} J.~Maynard Smith (1982). \emph{Evolution and the Theory of Games}. Cambridge University Press.
 \bibitem{nowak1992} M.~A.~Nowak and R.~M.~May (1992). Evolutionary games and spatial chaos. \emph{Nature}, 359(6398), 826--829.
 \end{thebibliography}
+
 
 \end{document}

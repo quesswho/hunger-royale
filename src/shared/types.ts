@@ -15,15 +15,16 @@ export interface SimConfig {
   zoneGradient: number;
   /** Single combat lethality constant lambda on normalized HP in [0, 1] */
   lethality: number;
+  /** Fraction of combat damage taken when fleeing from an attacker (rho in [0, 1]) */
+  fleeDamageFactor: number;
   /** Constant HP regenerated per round (0 in base model; normalized to [0, 1]) */
   healthRegen: number;
   startingPoints: number;
   survivalPoints: number;
   eliminationDivisor: number;
-  /** Inward radial drift per round as a fraction of current map radius R(t) */
-  inwardDriftFraction: number;
-  /** Random movement noise radius per round as a fraction of R(t) */
-  moveNoiseFraction: number;
+  /** Uniform random-walk min/max step length as a fraction of current map radius R(t) */
+  minMoveFraction: number;
+  maxMoveFraction: number;
   /** Flee step length as a fraction of R(t) */
   fleeStepFraction: number;
   roundIntervalMs: number;

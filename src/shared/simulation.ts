@@ -16,12 +16,13 @@ export const DEFAULT_CONFIG: SimConfig = {
   fightRadius: 18,
   zoneGradient: 1.0,
   lethality: 0.25,
+  fleeDamageFactor: 0.5,
   healthRegen: 0,
   startingPoints: 20,
   survivalPoints: 10,
   eliminationDivisor: 2,
-  inwardDriftFraction: 0.08,
-  moveNoiseFraction: 0.16,
+  minMoveFraction: 0.05,
+  maxMoveFraction: 0.15,
   fleeStepFraction: 0.22,
   roundIntervalMs: 900,
 };
@@ -286,17 +287,13 @@ export function stepRound(
         computeFleePosition(pos.x, pos.y, oppPos.x, oppPos.y, stepLen, nextRadius)
       );
     } else {
-      const distFromCenter = Math.hypot(pos.x, pos.y);
-      const driftLen = config.inwardDriftFraction * nextRadius;
-      const driftX =
-        distFromCenter > 1e-6 ? (-pos.x / distFromCenter) * driftLen : 0;
-      const driftY =
-        distFromCenter > 1e-6 ? (-pos.y / distFromCenter) * driftLen : 0;
-
-      const noiseAngle = rng() * Math.PI * 2;
-      const noiseLen = rng() * config.moveNoiseFraction * nextRadius;
-      const nx = pos.x + driftX + Math.cos(noiseAngle) * noiseLen;
-      const ny = pos.y + driftY + Math.sin(noiseAngle) * noiseLen;
+      const angle = rng() * Math.PI * 2;
+      const stepLen =
+        (config.minMoveFraction +
+          rng() * (config.maxMoveFraction - config.minMoveFraction)) *
+        nextRadius;
+      const nx = pos.x + Math.cos(angle) * stepLen;
+      const ny = pos.y + Math.sin(angle) * stepLen;
       nextPositions.set(p.id, clampToMap(nx, ny, nextRadius));
     }
   }
@@ -315,13 +312,26 @@ export function stepRound(
     if (decision.kind === "fight" && decision.targetId) {
       const target = byId.get(decision.targetId);
       if (target && target.alive) {
-        const dmg = computeDamage(p.strategy, target.strategy, config);
-        incomingDamage.set(target.id, (incomingDamage.get(target.id) ?? 0) + dmg);
-        const list = attackersOf.get(target.id) ?? [];
-        list.push(p.id);
-        attackersOf.set(target.id, list);
+        const targetDecision = decisions.get(target.id);
+        const baseDmg = computeDamage(p.strategy, target.strategy, config);
+        const dmg =
+          targetDecision?.kind === "flee"
+            ? baseDmg * clamp01(config.fleeDamageFactor)
+            : baseDmg;
+        if (dmg > 0) {
+          incomingDamage.set(
+            target.id,
+            (incomingDamage.get(target.id) ?? 0) + dmg
+          );
+          const list = attackersOf.get(target.id) ?? [];
+          list.push(p.id);
+          attackersOf.set(target.id, list);
+        }
 
-        const targetPos = nextPositions.get(target.id) ?? { x: target.x, y: target.y };
+        const targetPos = nextPositions.get(target.id) ?? {
+          x: target.x,
+          y: target.y,
+        };
         const selfPos = nextPositions.get(p.id) ?? { x: p.x, y: p.y };
         combatLines.push({
           fromId: p.id,
@@ -335,7 +345,6 @@ export function stepRound(
         });
 
         const dmgPct = Math.round(dmg * 100);
-        const targetDecision = decisions.get(target.id);
         roundEvents.push({
           round: nextRound,
           text:

@@ -711,7 +711,11 @@ export function App() {
               <p>
                 <strong>Duels:</strong> When two players enter fight range, each
                 fights with probability = Aggression or flees away. A fleeing
-                player hit by an attacker still takes combat damage.
+                player hit by an attacker takes{" "}
+                <strong>
+                  {Math.round(state.config.fleeDamageFactor * 100)}%
+                </strong>{" "}
+                combat damage while escaping.
               </p>
             </div>
           </section>
