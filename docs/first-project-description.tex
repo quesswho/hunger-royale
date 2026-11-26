@@ -1,0 +1,55 @@
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{parskip}
+
+\titlespacing*{\section}{0pt}{8pt}{3pt}
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+
+\title{\vspace{-1.4cm}\textbf{Hunger Royale: Continuous Strategy Selection in a Shrinking Spatial Arena}\\[4pt]
+\large First Project Description}
+\author{Group Members: \textit{[Insert Group Member Names]}}
+\date{November 26, 2026}
+
+\begin{document}
+\maketitle
+\vspace{-0.8cm}
+
+\section{Background and Motivation}
+Many strategic environments combine a \emph{behavioral} choice (whether to engage in conflict or avoid it) with a \emph{capability} choice (how to allocate limited resources between offense and defense) inside a spatially heterogeneous arena. Classical evolutionary game theory formalizes the fight-or-flee dilemma through the Hawk--Dove game \cite{maynard1973,maynard1982}, where aggressive strategies exploit passive ones but suffer mutual-conflict costs, yielding a mixed evolutionarily stable strategy (ESS). Subsequent work on spatial games shows that local interaction structure can substantially alter equilibrium outcomes compared to well-mixed populations \cite{nowak1992}.
+
+In this project, we formulate and investigate \textbf{Hunger Royale}, a multi-player spatial survival game inspired by shrinking-arena battle-royale dynamics. Players occupy a circular map divided into concentric zones that offer higher payoff multipliers toward the center while shrinking over time. This introduces an endogenous spatial trade-off: moving inward increases payoffs but concentrates players, raising encounter frequency and combat risk.
+
+\section{Game-Theoretic Core}
+We model an $N$-player simultaneous-move game over discrete rounds $t = 1, \dots, T$ on a circular arena of shrinking radius $R(t)$. Before a match begins, each player $i$ selects a continuous two-dimensional strategy $(a_i, d_i) \in [0,1]^2$:
+\begin{itemize}\itemsep2pt
+  \item \textbf{Aggression ($a_i$):} Behavioral tendency governing the probability of choosing \emph{Fight} ($a_i$) versus \emph{Flee} ($1-a_i$) when entering another player's fight radius.
+  \item \textbf{Damage vs.\ Defense ($d_i$):} Capability allocation trading off higher attack power (large $d_i$) against stronger defensive damage mitigation (small $d_i$).
+\end{itemize}
+Each round is resolved simultaneously. Players outside any opponent's fight radius perform semi-random greedy movement toward a point sampled from a reward-weighted spatial distribution, with uniform random step length scaled to $R(t)$. Players within fight radius simultaneously choose \emph{Fight} or \emph{Flee}: if both fight, both deal combat damage; if one flees and the other fights, the fleeing player moves in the boundary-constrained direction maximizing distance from the opponent while still taking combat damage; if both flee, both separate without damage. Surviving players receive a fixed survival payoff $s$ and constant zone-dependent health regeneration $h_z$, while eliminating an opponent with points $P_j$ grants a bounty $P_j / k$. All payoffs are multiplied by the player's current zone factor $m_z$ (highest in the inner core, lowest in the outer ring).
+
+\section{Research Question and Aim}
+Our central research question is: \emph{How do continuous aggression ($a$) and damage--defense allocation ($d$) interact in a shrinking, zone-weighted spatial arena, and which strategies emerge as best responses or evolutionarily stable?} Specifically, we aim to: (i) characterize the payoff landscape over $(a,d) \in [0,1]^2$, (ii) compare outcomes against a baseline non-spatial Hawk--Dove model to isolate the effects of shrinking geometry and bounty payoffs, and (iii) test how shifting the risk--reward gradient (zone multipliers vs.\ health regeneration) changes the winning strategy profile.
+
+\section{Method}
+We will investigate the model using three complementary approaches:
+\begin{enumerate}\itemsep2pt
+  \item \textbf{Analytical Baseline:} Derive a simplified two-player asymmetric Hawk--Dove benchmark linking $(a,d)$ to expected combat payoffs.
+  \item \textbf{Monte Carlo \& Evolutionary Simulation:} Implement a deterministic, seeded simulation engine to run large-scale tournaments across grids of $(a,d)$, compute empirical payoff matrices, and apply replicator dynamics and parameter sensitivity sweeps (zone multipliers, shrink rate, and elimination divisor $k$).
+  \item \textbf{Interactive Classroom Tournament:} Host a live web-based tournament (\texttt{Hunger Royale}) during the seminar in which classmates submit their own continuous $(a,d)$ strategies via QR code, allowing direct comparison between human strategic choices and simulated equilibria.
+\end{enumerate}
+
+\section{Scope and Limitations}
+To keep the strategic interaction transparent and analyzable within the course timeframe, we adopt several deliberate simplifications: strategies $(a_i, d_i)$ are fixed for the duration of a match and do not condition on current health, zone, or remaining population; movement follows a stochastic reward-weighted heuristic rather than strategic path-planning; and close-range encounters are resolved against the nearest opponent without explicit alliances or coalitions. These abstractions allow us to isolate the core trade-off between aggression, offensive investment, and spatial risk, while leaving state-dependent policies as natural directions for future work.
+
+\begin{thebibliography}{9}\itemsep1pt
+\small
+\bibitem{maynard1973} J.~Maynard Smith and G.~R.~Price (1973). The logic of animal conflict. \emph{Nature}, 246(5427), 15--18.
+\bibitem{maynard1982} J.~Maynard Smith (1982). \emph{Evolution and the Theory of Games}. Cambridge University Press.
+\bibitem{nowak1992} M.~A.~Nowak and R.~M.~May (1992). Evolutionary games and spatial chaos. \emph{Nature}, 359(6398), 826--829.
+\end{thebibliography}
+
+\end{document}
