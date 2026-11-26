@@ -89,6 +89,25 @@ export function clampToMap(
 }
 
 /**
+ * Reflect a point that overshoots the circular boundary back inside R(t),
+ * preventing sticky accumulation along the perimeter.
+ */
+function reflectIntoMap(
+  x: number,
+  y: number,
+  mapRadius: number
+): { x: number; y: number } {
+  const dist = Math.hypot(x, y);
+  if (dist <= mapRadius || dist === 0) {
+    return { x, y };
+  }
+  const overshoot = dist - mapRadius;
+  const reflectedDist = Math.max(0, mapRadius - overshoot);
+  const scale = reflectedDist / dist;
+  return { x: x * scale, y: y * scale };
+}
+
+/**
  * Compute flee destination that maximizes distance from the opponent while
  * remaining strictly inside the circular map of radius `mapRadius`.
  */
@@ -139,8 +158,9 @@ export function createInitialMatch(
   const count = Math.max(1, lobbyPlayers.length);
 
   const players: SimPlayer[] = lobbyPlayers.map((lp, index) => {
-    const baseAngle = (index / count) * Math.PI * 2 + (rng() - 0.5) * 0.35;
-    const spawnRadius = config.initialMapRadius * (0.55 + rng() * 0.38);
+    const baseAngle = (index / count) * Math.PI * 2 + (rng() - 0.5) * 0.5;
+    // Uniform area distribution across the disk (sqrt(U) * R)
+    const spawnRadius = Math.sqrt(rng()) * config.initialMapRadius * 0.9;
     const pos = clampToMap(
       Math.cos(baseAngle) * spawnRadius,
       Math.sin(baseAngle) * spawnRadius,
@@ -212,16 +232,19 @@ export function stepRound(
     )
   );
 
+  const shrinkScale =
+    prev.mapRadius > 0 ? nextRadius / prev.mapRadius : 1;
+
   const players: SimPlayer[] = prev.players.map((p) => {
-    const clamped = p.alive
-      ? clampToMap(p.x, p.y, nextRadius)
+    const scaled = p.alive
+      ? clampToMap(p.x * shrinkScale, p.y * shrinkScale, nextRadius)
       : { x: p.x, y: p.y };
     return {
       ...p,
       prevX: p.x,
       prevY: p.y,
-      x: clamped.x,
-      y: clamped.y,
+      x: scaled.x,
+      y: scaled.y,
       lastDamageTaken: 0,
       lastPointsGained: 0,
       targetId: null,
@@ -294,7 +317,7 @@ export function stepRound(
         nextRadius;
       const nx = pos.x + Math.cos(angle) * stepLen;
       const ny = pos.y + Math.sin(angle) * stepLen;
-      nextPositions.set(p.id, clampToMap(nx, ny, nextRadius));
+      nextPositions.set(p.id, reflectIntoMap(nx, ny, nextRadius));
     }
   }
 
